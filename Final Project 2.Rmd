@@ -1,0 +1,266 @@
+---
+title: "STA 141 - Final Project"
+author: "Yutian Yang, Xin Ye"
+output:
+  html_document:
+    df_print: paged
+---
+
+### Problem 1
+```{r, echo = FALSE}
+library(car)
+library(ggplot2)
+winequality.white <- read.csv("C:/Users/charl/Downloads/winequality-white (1).csv", sep=";")
+attach(winequality.white)
+table(`winequality.white`$quality)
+
+wine_low_index = which(winequality.white$quality <= 4)
+wine_low = winequality.white[wine_low_index,]
+wine_low[,"quality"] = 0
+
+wine_high_index = which(winequality.white$quality >6) #including index with mid and low quality
+wine_high = winequality.white[wine_high_index,]
+wine_high[,"quality"] = 2
+
+wine_mid = winequality.white[-c(wine_low_index,wine_high_index),]
+wine_mid[,"quality"] = 1
+
+new_winequality.white = rbind(wine_low,wine_mid,wine_high)
+wine_mid_index = which(new_winequality.white$quality == 1)
+
+
+pairs(~ fixed.acidity + volatile.acidity + residual.sugar + free.sulfur.dioxide + density + pH + sulphates + alcohol+quality, data = `new_winequality.white`, main = " pair plot")
+
+
+# individual r square:
+# fixed.acidity: 0.007839
+# volatile.acidity: 0.004935
+# citric.acid: 0.001278
+# residual.sugar: 0.01296
+# chlorides: 0.03347
+# free.sulfur.dioxide: 0.0009707
+# total.sulfur.dioxide: 0.02728
+# density: 0.07926
+# pH: 0.008183
+# sulphates: 0.002108
+# alcohol: 0.144 comparing that 
+
+
+
+
+```
+
+### Problem 2
+```{r, echo = FALSE}
+ggwine = ggplot(winequality.white,aes(log10(alcohol),density))
+ggwine + geom_point(alpha=I(1/5)) +geom_smooth(method="lm")+ facet_wrap(quality)
+#slope of better high alcohol is steeper
+
+library(GGally)
+ggpairs(winequality.white, c(4,8,11,6,7), mapping = ggplot2::aes(alpha = 0.5), 
+        lower=list(continuous = wrap("smooth", alpha=0.3,size=0.2,color="grey")))
+## ggplot using general smoother
+ggplot(winequality.white,aes(alcohol,quality))+geom_smooth()
+ggplot(winequality.white,aes(sulphates,quality))+geom_smooth(method="lm")
+
+```
+
+### Problem 3
+```{r, echo = FALSE}
+#apply all factor without interaction, citric acid, chlorides, total.sulfur.dioxide are not significant
+wine.lm1 = lm(quality ~   fixed.acidity + volatile.acidity + residual.sugar +free.sulfur.dioxide + density + pH + sulphates + alcohol , data = `winequality.white`)
+summary(wine.lm1)
+plot(wine.lm1)
+AIC(wine.lm1)
+BIC(wine.lm1)
+
+ei = wine.lm1$residuals
+##use Shapiro-Wilks test to test the normality of the Linear Model
+the.SWtest = shapiro.test(ei)
+the.SWtest
+## non-constant test to test the if our data has constant error
+ncvTest(wine.lm1)
+## Box-cox Transformation
+library(EnvStats)
+L2 = boxcox(wine.lm1 ,objective.name = "Shapiro-Wilk",optimize = TRUE)$lambda
+
+YT = (winequality.white$quality^(L2)-1)/L2
+##Transformed data
+t.data = cbind.data.frame(winequality.white,YT)
+t.model = lm(YT ~ fixed.acidity + volatile.acidity + residual.sugar +free.sulfur.dioxide + density + pH + sulphates + alcohol ,data = t.data)
+summary(t.model)
+ei = t.model$residuals
+##use Shapiro-Wilks test to test the normality of the transformed Model
+the.SWtest = shapiro.test(ei)
+the.SWtest
+## non-constant test to test the if our data has constant error
+ncvTest(t.model)
+
+
+#add interaction based on alcohol
+wine.lm2 = lm(quality ~   fixed.acidity + volatile.acidity + residual.sugar +free.sulfur.dioxide + density + pH + sulphates + alcohol + alcohol*density + density*residual.sugar +density*total.sulfur.dioxide, data = `winequality.white`)
+summary(wine.lm2)
+plot(wine.lm1)
+plot(wine.lm2)
+##Record AIC and BIC value
+AIC(wine.lm2)
+BIC(wine.lm2)
+
+###Lasso Regression
+install.packages("glmnetcr")
+library(glmnetcr)
+x_vars <- model.matrix(quality~. , winequality.white)[,-1]
+y_var <- winequality.white$quality
+lambda_seq <- 10^seq(2, -2, by = -.1)
+set.seed(86)
+train = sample(1:nrow(x_var), nrow(x_var)/2)
+x_test = (-train)
+y_test = y_var[test]
+
+cv_output <- cv.glmnet(x_vars[train,], y_var[train], 
+            alpha = 1, lambda = lambda_seq)
+
+# identifying best lamda
+best_lam <- cv_output$lambda.min
+
+
+```
+
+### Problem 4
+```{r, echo = FALSE}
+ks.test(wine.lm1$residuals,rnorm(1000))
+# Residual bootstrap (resample residuals)
+bootresid = function(lmobj) {   # an lm object
+  n = length(lmobj$resid)
+  # Sample row numbers (i) rather than values (e_i)
+  idx = sample(n, n, replace = TRUE)
+  # Use row numbers to get new residuals (e_samp_i).
+  res_samp = lmobj$resid[idx]
+  # y_samp_i =  b_0 + b_1 * x_i    + e_samp_i
+  y_samp =  lmobj$fitted     + res_samp
+  # take x variable to be the original x variable
+  x = lmobj$model[,2]
+  # create the data frame for the resampled data
+  data.boot = data.frame(x,y_samp)
+  # Fit the same model with new data (y_samp_i, x_i).
+  boot.lm = lm(y_samp ~ x, data.boot)
+  
+  return (coef(boot.lm))
+}
+
+# Boostrap distribution of the regression coefficients
+N = 1000  # Number of bootstrap samples
+
+# bootsrap samples of coefficients (b0_boot, b1_boot)
+coef.boot = replicate(N, bootresid(wine.lm1))
+
+coef.boot = data.frame(t(coef.boot))
+colnames(coef.boot) = c("b0_boot","b1_boot")
+
+#############
+## plot the sampling distribution of (b0_boot,b1_boot),
+## also known as the bootstrap distribution of (b0,b1)
+library(ggplot2)
+boot.pl = ggplot(data=coef.boot, aes(b0_boot,b1_boot))
+
+# scatter plot together with the contour plot of the density
+boot.pl + geom_point() + stat_density2d()
+
+## Confidence intervals
+## Bootstrap confidence interval
+alpha = 0.05
+## Theoretical confidence intervals based on Gaussian linear regression model
+beta.conf.th = confint(wine.lm1,level=1-alpha)  # confidence coefficient is (1-alpha)
+beta.conf.boot = sapply(1:2, function(i) quantile(coef.boot[,i],c(alpha/2,1-alpha/2)))
+#express the confidence intervals in an easily interpretable format
+beta.conf.boot = t(beta.conf.boot)
+rownames(beta.conf.boot) = c("quality_boot","alcohol_boot")
+
+
+```
+
+### Problem 4
+```{r, echo = FALSE}
+#classification
+library(MASS)
+set.seed(100)
+test_low_quality_idx = sample(wine_low_index,round(0.2*(length(wine_low_index))))
+test_mid_quality_idx = sample(wine_mid_index,round(0.2*(length(wine_mid_index))))
+test_high_quality_idx = sample(wine_high_index,round(0.2*(length(wine_high_index))))
+
+test_idx  = c(test_low_quality_idx,test_mid_quality_idx,test_high_quality_idx)
+testdata = new_winequality.white[test_idx,]
+traindata = new_winequality.white[-test_idx,]
+
+winequality.lda = lda(quality~fixed.acidity + volatile.acidity + residual.sugar +free.sulfur.dioxide + density + pH + sulphates + alcohol + alcohol*density + density*residual.sugar +density*total.sulfur.dioxide,traindata)
+winequality.lda
+winequality.lda$means
+
+winequality.pred.lda = predict(winequality.lda,testdata,type = "response")
+winequality.confusion.lda = table(true = testdata$quality, predicted = winequality.pred.lda$class)
+winequality.confusion.lda
+
+winequality.pred.lda_error = (winequality.confusion.lda[1,2] +winequality.confusion.lda[1,3] +winequality.confusion.lda[2,1]+winequality.confusion.lda[2,3]+winequality.confusion.lda[3,1]+winequality.confusion.lda[3,2])/sum(winequality.confusion.lda)
+winequality.pred.lda_error
+```
+### Problem 4b
+```{r, echo = FALSE}
+#classification
+library(nnet)
+winequality.glm = multinom(quality~fixed.acidity + volatile.acidity + residual.sugar +free.sulfur.dioxide + density + pH + sulphates + alcohol + alcohol*density + density*residual.sugar +density*total.sulfur.dioxide, traindata)
+winequality.glm
+summary(winequality.glm)
+winequality.pred.glm = predict(winequality.glm, testdata, type = "class")
+winequality.glm.con = table(true = testdata$quality, model = winequality.pred.glm)
+winequality.glm.con
+winequality.pred.glm_error = (winequality.glm.con[1,2] +winequality.glm.con[1,3] +winequality.glm.con[2,1]+winequality.glm.con[2,3]+winequality.glm.con[3,1]+winequality.glm.con[3,2])/sum(winequality.confusion.lda)
+winequality.pred.glm_error
+```
+### Problem 5
+```{r, echo = FALSE}
+set.seed(100)
+library(class)
+
+knn_pred1 = knn(
+  train = traindata[c("fixed.acidity","volatile.acidity","residual.sugar","free.sulfur.dioxide","density","pH","sulphates","alcohol")], 
+  test  = testdata[c("fixed.acidity","volatile.acidity","residual.sugar","free.sulfur.dioxide","density","pH","sulphates","alcohol")], 
+  cl    = traindata$quality,                    
+  k     = 30
+)
+# Confusion matrix.
+knn_con1 = table(true = testdata$quality, model = knn_pred1)
+knn_con1
+#Misclassification error rate
+winequality.pred.knn_error1 = (knn_con1[1,2] + knn_con1[1,3]+knn_con1[2,1]+knn_con1[2,3]+knn_con1[3,1]+knn_con1[3,2])/sum(knn_con1)
+winequality.pred.knn_error1
+
+knn_pred2 = knn(
+  train = traindata[c("fixed.acidity","volatile.acidity","residual.sugar","free.sulfur.dioxide","density","pH","sulphates","alcohol")], 
+  test  = testdata[c("fixed.acidity","volatile.acidity","residual.sugar","free.sulfur.dioxide","density","pH","sulphates","alcohol")], 
+  cl    = traindata$quality,                    
+  k     = 50
+)
+# Confusion matrix.
+knn_con2 = table(true = testdata$quality, model = knn_pred2)
+knn_con2
+#Misclassification error rate
+winequality.pred.knn_error2 = (knn_con2[1,2] + knn_con2[1,3]+knn_con2[2,1]+knn_con2[2,3]+knn_con2[3,1]+knn_con2[3,2])/sum(knn_con2)
+winequality.pred.knn_error2
+
+knn_pred3 = knn(
+  train = traindata[c("fixed.acidity","volatile.acidity","residual.sugar","free.sulfur.dioxide","density","pH","sulphates","alcohol")], 
+  test  = testdata[c("fixed.acidity","volatile.acidity","residual.sugar","free.sulfur.dioxide","density","pH","sulphates","alcohol")], 
+  cl    = traindata$quality,                    
+  k     = 70
+)
+# Confusion matrix.
+knn_con3 = table(true = testdata$quality, model = knn_pred3)
+knn_con3
+#Misclassification error rate
+winequality.pred.knn_error3 = (knn_con3[1,2] + knn_con3[1,3]+knn_con3[2,1]+knn_con3[2,3]+knn_con3[3,1]+knn_con3[3,2])/sum(knn_con3)
+winequality.pred.knn_error3
+```
+
+### R Appendix
+```{r, ref.label=knitr::all_labels(),echo=TRUE,eval=FALSE}
+```
