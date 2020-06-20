@@ -1,0 +1,121 @@
+---
+title: "ECN 140 Empirical Project"
+author: "Yutian Yang"
+date: "2/21/2020"
+output: html_document
+---
+
+```{r}
+Cost_of_living_index <- read.csv("C:/Users/charl/Downloads/Cost_of_living_index.csv")
+library(dplyr)
+library(tidyverse)
+library(ggplot2)
+library(GGally)
+library(ggpubr)
+attach(Cost_of_living_index)
+```
+Cost of living indices are relative to New York City (NYC) which means that for New York City, each index should be 100. If another city has, for example, rent index of 120, it means that on an average in that city rents are 20% more expensive than in New York City. If a city has rent index of 70, that means on an average in that city rents are 30% less expensive than in New York City.
+```{r}
+rank_cost = Cost_of_living_index %>% arrange(desc(Cost.of.Living.Plus.Rent.Index))
+view(rank_cost)
+rank_purchase = Cost_of_living_index %>% arrange(desc(Local.Purchasing.Power.Index))
+view(rank_purchase)
+
+New_Cost_of_living_index = separate(Cost_of_living_index, City, c("City","Country"), sep = ",", remove = TRUE, convert = FALSE, extra = "warn", fill = "warn")
+```
+
+```{r}
+mean(Cost.of.Living.Index)
+mean(Rent.Index)
+mean(Cost.of.Living.Plus.Rent.Index)
+```
+
+```{r}
+ggpairs(Cost_of_living_index, c(3,4,6,7,8), mapping = ggplot2::aes(alpha = 0.5), 
+        lower=list(continuous = wrap("smooth", alpha=0.3,size=0.2,color="grey")))
+ggcorr(Cost_of_living_index[,c(3,4,6,7,8)], method = c("everything", "pearson")) 
+#all variables are highly positively correlated
+
+ggdensity(Cost_of_living_index$Local.Purchasing.Power.Index)
+ggqqplot(Cost_of_living_index$Local.Purchasing.Power.Index)
+
+summary(lm(Cost.of.Living.Index~Groceries.Index,data = Cost_of_living_index))
+summary(lm(Cost.of.Living.Index~Restaurant.Price.Index,data = Cost_of_living_index))
+ggplot(Cost_of_living_index,aes(Groceries.Index,Cost.of.Living.Index))+geom_smooth(method="lm")
+ggplot(Cost_of_living_index,aes(Restaurant.Price.Index,Cost.of.Living.Index))+geom_smooth(method="lm")
+```
+
+```{r}
+model_1 = lm(Cost.of.Living.Index~Local.Purchasing.Power.Index+Rent.Index+Groceries.Index+Restaurant.Price.Index, data = Cost_of_living_index)
+summary(model_1)
+plot(model_1)
+
+model_2 = lm(Cost.of.Living.Index~Local.Purchasing.Power.Index+Groceries.Index+Restaurant.Price.Index, data = Cost_of_living_index)
+summary(model_2)
+plot(model_2)
+
+model_3 = lm(Cost.of.Living.Index~Local.Purchasing.Power.Index+Groceries.Index+Restaurant.Price.Index+Groceries.Index*Restaurant.Price.Index, data = Cost_of_living_index)
+summary(model_3)
+plot(model_3)
+```
+
+
+```{r}
+out_index = which(grepl('United States$', City))
+Cost_of_living_index_inside = Cost_of_living_index[out_index,]
+Cost_of_living_index_outside = Cost_of_living_index[-out_index,]
+
+Cost_of_living_index_inside[,"City"] = "inside"
+Cost_of_living_index_outside[,"City"] = "outside"
+
+new_Cost_of_living_index = rbind(Cost_of_living_index_inside,Cost_of_living_index_outside)
+```
+
+
+```{r}
+group.means = by(new_Cost_of_living_index$Cost.of.Living.Index,new_Cost_of_living_index$City,mean)  # First argument is Y, second is grouping column/s
+plot(group.means,xaxt = "n",pch = 19,col = "purple",xlab = "City inside or outside of the United STates",ylab = "Cost of Living Index",main = "Average cost of living index by city",type = "b") #Addinf xaxt = "n" removes the default X axis ticks.
+axis(1,1:length(group.means),names(group.means)) #Adding in our own X axis names
+
+
+boxplot(new_Cost_of_living_index$Cost.of.Living.Index~new_Cost_of_living_index$City, main = "Average cost of living index by cit",ylab = "Cost of Living Index")
+```
+
+```{r}
+group.means =  by(new_Cost_of_living_index$Cost.of.Living.Index,new_Cost_of_living_index$City,mean)
+group.sds = by(new_Cost_of_living_index$Cost.of.Living.Index,new_Cost_of_living_index$City,sd)
+group.nis = by(new_Cost_of_living_index$Cost.of.Living.Index,new_Cost_of_living_index$City,length)
+the.summary = rbind(group.means,group.sds,group.nis)
+the.summary = round(the.summary,digits = 4)
+colnames(the.summary) = names(group.means)
+rownames(the.summary) = c("Means","Std. Dev","Sample Size")
+the.summary
+```
+
+```{r}
+the.model = lm(Cost.of.Living.Index ~ City, data = new_Cost_of_living_index)
+anova.table = anova(the.model)
+anova.table
+```
+
+```{r}
+t.test(Cost_of_living_index_inside$Cost.of.Living.Index, Cost_of_living_index_outside$Cost.of.Living.Index)
+```
+
+```{r}
+low_index = which(Cost_of_living_index$Cost.of.Living.Index<= mean(Cost.of.Living.Index))
+Cost_of_living_index_low = Cost_of_living_index[low_index,]
+Cost_of_living_index_high = Cost_of_living_index[-low_index,]
+
+Cost_of_living_index_low[,"Cost.of.Living.Index"] = 0
+Cost_of_living_index_high[,"Cost.of.Living.Index"] = 1
+
+new_Cost_of_living_index_2 = rbind(Cost_of_living_index_low,Cost_of_living_index_high)
+
+costofliving.glm_1 <- glm(Cost.of.Living.Index~Rent.Index+Local.Purchasing.Power.Index+Groceries.Index+Restaurant.Price.Index, data = new_Cost_of_living_index_2, family = "binomial")
+summary(costofliving.glm_1)
+
+costofliving.glm_2 <- glm(Cost.of.Living.Index~Groceries.Index+Restaurant.Price.Index, data = new_Cost_of_living_index_2, family = "binomial")
+
+summary(costofliving.glm_2)
+```
